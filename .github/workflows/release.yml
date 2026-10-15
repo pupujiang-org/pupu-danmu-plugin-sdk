@@ -1,0 +1,47 @@
+name: Verify tagged SDK release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - name: Install SDK and development dependencies
+        run: uv sync --locked --group dev
+      - name: Confirm tag matches package version
+        shell: bash
+        run: |
+          expected_version="$(printf '%s' "$GITHUB_REF_NAME" | sed 's/^v//')"
+          uv run --locked python -c "import tomllib; from pathlib import Path; version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']; assert version == '$expected_version', f'tag {expected_version} does not match package version {version}'"
+      - name: Run SDK contract tests
+        run: uv run --locked pytest -q
+      - name: Build wheel and source distribution
+        run: uv build --out-dir dist
+      - name: Verify built artifacts and record SHA-256
+        shell: bash
+        run: |
+          expected_version="$(printf '%s' "$GITHUB_REF_NAME" | sed 's/^v//')"
+          uv run --locked python scripts/verify_dist.py --dist-dir dist --expected-version "$expected_version"
+      - name: Retain verified release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-release
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
