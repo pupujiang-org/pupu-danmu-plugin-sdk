@@ -1,6 +1,6 @@
 # Pupu Danmu Plugin SDK
 
-A small Python package for the version 2 plugin protocol, capability-checked local host adapters, deterministic clocks, and anonymous JSONL replay.
+A small Python package for the version 3 plugin protocol, capability-checked local host adapters, deterministic clocks, and anonymous JSONL replay.
 
 This package contains data contracts and local development tools. It does not download or sandbox plugins, authorize production execution, or decide whether a generated candidate may be sent. Those responsibilities stay with the host application.
 
@@ -15,6 +15,8 @@ Install the exact wheel attached to the official GitHub release:
 
     uv add "pupu-danmu-plugin-sdk @ https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/download/v0.2.0/pupu_danmu_plugin_sdk-0.2.0-py3-none-any.whl"
 
+The published v0.2.0 release implements protocol v2 and remains unchanged. This checkout develops SDK v0.3.0.dev0 with protocol v3; it is not published yet.
+
 For local development from a checkout:
 
     uv sync --group dev
@@ -28,7 +30,7 @@ The build produces a wheel and a source distribution in dist/.
 
 ## Replay anonymous protocol data
 
-Create a UTF-8 JSONL file with one protocol-v2 invocation per line, then run:
+Create a UTF-8 JSONL file with one protocol-v3 invocation per line, then run:
 
     pupu-danmu-plugin-replay anonymous.jsonl
 
@@ -42,7 +44,7 @@ The one-invocation Worker process is a development runtime for host integration 
 
 ## Compatibility
 
-The SDK package version follows semantic versioning independently from protocol version 2, the host application version, and individual plugin versions. See docs/protocol-compatibility.md before changing or pinning a protocol implementation.
+The SDK package version follows semantic versioning independently from protocol version 3, the host application version, and individual plugin versions. The published v0.2.0 package remains on protocol v2. See docs/protocol-compatibility.md before changing or pinning a protocol implementation.
 
 ## Security
 

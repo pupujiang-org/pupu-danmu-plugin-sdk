@@ -12,7 +12,7 @@ import zipfile
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
-_FIXTURE = _ROOT / "tests" / "fixtures" / "anonymous-v2.jsonl"
+_FIXTURE = _ROOT / "tests" / "fixtures" / "anonymous-v3.jsonl"
 _REQUIRED_PACKAGE_FILES = (
     "pupu_danmu_plugin_sdk/__init__.py",
     "pupu_danmu_plugin_sdk/protocol.py",
