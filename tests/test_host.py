@@ -7,6 +7,7 @@ from pupu_danmu_plugin_sdk.host import (
     CapabilityDeniedError,
     HostRpcClient,
     HostStub,
+    remote_context,
 )
 from pupu_danmu_plugin_sdk.protocol import (
     CapabilityResponse,
@@ -114,3 +115,54 @@ def test_host_rpc_client_rejects_response_for_another_request() -> None:
 
     with pytest.raises(ValueError, match="request_id mismatch"):
         client.call("llm.generate", "llm.generate.generate", {"prompt": "hello"})
+
+
+def test_remote_context_routes_llm_and_session_storage_through_host_rpc(
+    invocation,
+) -> None:
+    class ContextRpcTransport(_RpcTransport):
+        def exchange(self, payload: bytes) -> bytes:
+            call = decode_capability_call(payload)
+            self.calls.append(call)
+            result = {
+                "llm.generate.generate": "candidate",
+                "storage.session.get": None,
+                "storage.session.set": None,
+                "storage.session.delete": True,
+            }[call.method]
+            return encode_capability_response(
+                CapabilityResponse(call.request_id, True, result=result)
+            )
+
+    transport = ContextRpcTransport()
+    context = remote_context(
+        invocation,
+        capabilities={"llm.generate", "storage.session"},
+        transport=transport,
+    )
+
+    assert context.generate("short prompt") == "candidate"
+    assert context.storage.get("topic", "default") == "default"
+    context.storage.set("topic", {"name": "cotton"})
+    assert context.storage.delete("topic") is True
+    assert [call.method for call in transport.calls] == [
+        "llm.generate.generate",
+        "storage.session.get",
+        "storage.session.set",
+        "storage.session.delete",
+    ]
+
+
+def test_remote_context_enforces_declared_capabilities(invocation) -> None:
+    context = remote_context(invocation, capabilities=(), transport=_RpcTransport())
+
+    with pytest.raises(CapabilityDeniedError):
+        context.generate("short prompt")
+    with pytest.raises(CapabilityDeniedError):
+        _ = context.storage
+
+
+def test_host_issued_opportunity_is_available_without_room_read(invocation) -> None:
+    context = HostStub().context_for(invocation)
+
+    assert context.opportunity == invocation.opportunity

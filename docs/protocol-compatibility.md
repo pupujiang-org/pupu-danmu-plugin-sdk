@@ -4,7 +4,7 @@ The SDK package version and the wire protocol version are separate version lines
 
 | Version line | Current value | Meaning |
 | --- | --- | --- |
-| SDK package | 0.1.0 (latest release); 0.2.0.dev0 (local development) | Python distribution API and packaging changes |
+| SDK package | 0.2.0 | Python distribution API and packaging changes |
 | Plugin protocol | 2 | Version field carried by invocation and Worker outcome messages |
 | Host application | Host-owned | Determines which SDK release and protocol versions it supports |
 | Plugin | Plugin-owned | Declares its SDK and protocol compatibility |
@@ -17,9 +17,11 @@ Invocation context contains anonymous viewer message identifiers and timestamps,
 
 ## Host capability RPC in protocol v2
 
-SDK 0.2.0.dev0 adds `CapabilityCall` and `CapabilityResponse` messages for a Worker to request one host capability operation and receive a correlated result, plus a host `WorkerCancellation` control message. Calls are limited to `llm.generate.generate` and `storage.session.get`, `storage.session.set`, or `storage.session.delete`; the capability must match the selected method. Each message uses the protocol message-size limit and strict UTF-8 JSON validation, including duplicate-key and non-finite-number rejection.
+SDK 0.2.0 adds `CapabilityCall` and `CapabilityResponse` messages for a Worker to request one host capability operation and receive a correlated result, plus a host `WorkerCancellation` control message. Calls are limited to `llm.generate.generate` and `storage.session.get`, `storage.session.set`, or `storage.session.delete`; the capability must match the selected method. Each message uses the protocol message-size limit and strict UTF-8 JSON validation, including duplicate-key and non-finite-number rejection.
 
 The request id is the only correlation value in an RPC response. Calls and responses carry no invocation, run, capture, or session identity. The host retains those identities in its pending invocation state and remains responsible for authorizing each call, validating its payload, and applying session isolation. The SDK client provides framing-neutral byte exchange and correlation checks; it does not grant capabilities or implement the host broker.
+
+The SDK's development Worker process handles one invocation per process and reads a `module:function` plugin entrypoint. It supports newline-delimited bounded protocol frames over standard input/output, and redirects plugin stdout away from the protocol stream. This is process isolation for host integration tests only, not an operating-system sandbox. Remote/community Python execution remains disabled until the host's Windows isolation and authorization gates pass.
 
 ## Compatibility policy
 

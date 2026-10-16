@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pupu-danmu-plugin-sdk"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "Protocol v2 data contracts and local replay tools for Pupu Danmu plugins"
 readme = "README.md"
 requires-python = ">=3.13"

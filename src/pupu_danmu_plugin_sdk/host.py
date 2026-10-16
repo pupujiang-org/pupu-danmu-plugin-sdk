@@ -91,6 +91,14 @@ class Llm(Protocol):
     def generate(self, prompt: str) -> str: ...
 
 
+class SessionStoragePort(Protocol):
+    def get(self, key: str, default: object = None) -> object: ...
+
+    def set(self, key: str, value: object) -> None: ...
+
+    def delete(self, key: str) -> bool: ...
+
+
 class MockLlm:
     """A deterministic response queue that never contacts a model service."""
 
@@ -216,7 +224,7 @@ class PluginContext:
 
     _invocation: Invocation = field(repr=False)
     _capabilities: frozenset[str]
-    _storage: SessionStorage
+    _storage: SessionStoragePort
     _llm: Llm
     clock: ReplayClock
 
@@ -241,7 +249,6 @@ class PluginContext:
 
     @property
     def opportunity(self):
-        self._require("room.read")
         return self._invocation.opportunity
 
     @property
@@ -302,6 +309,85 @@ class HostStub:
         )
 
 
+class _RemoteLlm:
+    __slots__ = ("_client",)
+
+    def __init__(self, client: HostRpcClient) -> None:
+        self._client = client
+
+    def generate(self, prompt: str) -> str:
+        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 16_000:
+            raise ValueError("LLM prompt is invalid or exceeds its size limit")
+        result = self._client.call(
+            "llm.generate",
+            "llm.generate.generate",
+            {"prompt": prompt},
+        )
+        if not isinstance(result, str) or len(result) > MAX_CANDIDATE_CHARS:
+            raise ValueError("host LLM response is invalid or too large")
+        return result
+
+
+class _RemoteSessionStorage:
+    __slots__ = ("_client",)
+
+    def __init__(self, client: HostRpcClient) -> None:
+        self._client = client
+
+    def get(self, key: str, default: object = None) -> object:
+        SessionStorage._validate_key(key)
+        result = self._client.call(
+            "storage.session",
+            "storage.session.get",
+            {"key": key},
+        )
+        return default if result is None else result
+
+    def set(self, key: str, value: object) -> None:
+        SessionStorage._validate_key(key)
+        normalized = SessionStorage._normalize(value, max_bytes=64 * 1024)
+        self._client.call(
+            "storage.session",
+            "storage.session.set",
+            {"key": key, "value": normalized},
+        )
+
+    def delete(self, key: str) -> bool:
+        SessionStorage._validate_key(key)
+        result = self._client.call(
+            "storage.session",
+            "storage.session.delete",
+            {"key": key},
+        )
+        if type(result) is not bool:
+            raise ValueError("host session storage returned an invalid result")
+        return result
+
+
+def remote_context(
+    invocation: Invocation,
+    *,
+    capabilities: Iterable[str],
+    transport: CapabilityTransport,
+    clock: ReplayClock | None = None,
+) -> PluginContext:
+    """Create one Worker context whose optional services use host RPC only."""
+
+    if not isinstance(invocation, Invocation):
+        raise TypeError("Worker context requires a protocol Invocation")
+    selected = frozenset(capabilities)
+    if not selected.issubset(SUPPORTED_CAPABILITIES):
+        raise ValueError("Worker context capabilities contain an unsupported value")
+    client = HostRpcClient(transport)
+    return PluginContext(
+        _invocation=invocation,
+        _capabilities=selected,
+        _storage=_RemoteSessionStorage(client),
+        _llm=_RemoteLlm(client),
+        clock=clock or ReplayClock(),
+    )
+
+
 __all__ = [
     "CapabilityCallError",
     "CapabilityDeniedError",
@@ -311,4 +397,5 @@ __all__ = [
     "MockLlm",
     "PluginContext",
     "SessionStorage",
+    "remote_context",
 ]
