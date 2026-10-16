@@ -19,6 +19,7 @@ from pupu_danmu_plugin_sdk.protocol import (
     JsonValue,
     RoomEvidence,
     SelfSentMessage,
+    SessionConfiguration,
     Settlement,
     ViewerMessage,
     decode_capability_response,
@@ -246,6 +247,11 @@ class PluginContext:
     def session_focus(self):
         self._require("room.read")
         return self._invocation.session_focus
+
+    @property
+    def session_configuration(self) -> SessionConfiguration:
+        self._require("session.config.read")
+        return self._invocation.session_configuration
 
     @property
     def opportunity(self):
