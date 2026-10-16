@@ -5,21 +5,21 @@ from __future__ import annotations
 import argparse
 import importlib
 import sys
-from collections.abc import Callable
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pupu_danmu_plugin_sdk.host import HostStub
-from pupu_danmu_plugin_sdk.host import PluginContext
-from pupu_danmu_plugin_sdk.protocol import SUPPORTED_CAPABILITIES
-from pupu_danmu_plugin_sdk.protocol import Candidate
-from pupu_danmu_plugin_sdk.protocol import Invocation
-from pupu_danmu_plugin_sdk.protocol import Silent
-from pupu_danmu_plugin_sdk.protocol import TypedFailure
-from pupu_danmu_plugin_sdk.protocol import WorkerOutcome
-from pupu_danmu_plugin_sdk.protocol import decode_invocation
+from pupu_danmu_plugin_sdk.host import HostStub, PluginContext
+from pupu_danmu_plugin_sdk.protocol import (
+    SUPPORTED_CAPABILITIES,
+    Candidate,
+    Invocation,
+    Silent,
+    TypedFailure,
+    WorkerOutcome,
+    decode_invocation,
+)
 
 PluginEntrypoint = Callable[[PluginContext], WorkerOutcome]
 

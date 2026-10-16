@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
-from pupu_danmu_plugin_sdk.protocol import Invocation
-from pupu_danmu_plugin_sdk.protocol import Opportunity
-from pupu_danmu_plugin_sdk.protocol import OpportunityMode
-from pupu_danmu_plugin_sdk.protocol import SessionFocus
-from pupu_danmu_plugin_sdk.protocol import ViewerChatSnapshot
+
+from pupu_danmu_plugin_sdk.protocol import (
+    Invocation,
+    Opportunity,
+    OpportunityMode,
+    SessionFocus,
+    ViewerChatSnapshot,
+)
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 

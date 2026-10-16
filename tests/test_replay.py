@@ -5,11 +5,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from conftest import NOW
+
 from pupu_danmu_plugin_sdk.clock import ReplayClock
 from pupu_danmu_plugin_sdk.protocol import encode_invocation
 from pupu_danmu_plugin_sdk.replay import ReplayHarness
-
-from conftest import NOW
 
 
 def test_anonymous_jsonl_replay_round_trips_without_account_state(invocation) -> None:

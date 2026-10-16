@@ -4,19 +4,26 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable
-from dataclasses import dataclass
-from dataclasses import field
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from threading import Lock
 from typing import Protocol
+from uuid import uuid4
 
 from pupu_danmu_plugin_sdk.clock import ReplayClock
-from pupu_danmu_plugin_sdk.protocol import MAX_CANDIDATE_CHARS
-from pupu_danmu_plugin_sdk.protocol import SUPPORTED_CAPABILITIES
-from pupu_danmu_plugin_sdk.protocol import Invocation
-from pupu_danmu_plugin_sdk.protocol import RoomEvidence
-from pupu_danmu_plugin_sdk.protocol import SelfSentMessage
-from pupu_danmu_plugin_sdk.protocol import Settlement
-from pupu_danmu_plugin_sdk.protocol import ViewerMessage
+from pupu_danmu_plugin_sdk.protocol import (
+    MAX_CANDIDATE_CHARS,
+    SUPPORTED_CAPABILITIES,
+    CapabilityCall,
+    Invocation,
+    JsonValue,
+    RoomEvidence,
+    SelfSentMessage,
+    Settlement,
+    ViewerMessage,
+    decode_capability_response,
+    encode_capability_call,
+)
 
 _MAX_STORAGE_KEY_CHARS = 128
 _MAX_STORAGE_DEPTH = 12
@@ -25,6 +32,59 @@ _MAX_STORAGE_NODES = 2048
 
 class CapabilityDeniedError(PermissionError):
     """Raised when local plugin code calls a host method it did not declare."""
+
+
+class CapabilityCallError(RuntimeError):
+    """A broker rejected one request with a stable, content-free code."""
+
+    def __init__(self, error_code: str) -> None:
+        self.error_code = error_code
+        super().__init__(error_code)
+
+
+class CapabilityTransport(Protocol):
+    """Synchronous byte exchange supplied by the isolated Worker runtime."""
+
+    def exchange(self, payload: bytes) -> bytes: ...
+
+
+class HostRpcClient:
+    """Worker-side client for host-brokered capabilities.
+
+    The transport only sees bounded protocol frames. Invocation identity,
+    session authority, and permission decisions stay in the host broker.
+    """
+
+    __slots__ = ("_lock", "_request_number", "_request_prefix", "_transport")
+
+    def __init__(self, transport: CapabilityTransport) -> None:
+        if not callable(getattr(transport, "exchange", None)):
+            raise TypeError("capability transport must provide exchange(payload)")
+        self._transport = transport
+        self._request_prefix = uuid4().hex
+        self._request_number = 0
+        self._lock = Lock()
+
+    def call(
+        self,
+        capability: str,
+        method: str,
+        payload: Mapping[str, object],
+    ) -> JsonValue:
+        """Make one correlated RPC; the host independently authorizes every call."""
+
+        with self._lock:
+            self._request_number += 1
+            request_id = f"rpc-{self._request_prefix}-{self._request_number}"
+            request = CapabilityCall(request_id, capability, method, payload)
+            response_bytes = self._transport.exchange(encode_capability_call(request))
+            response = decode_capability_response(
+                response_bytes,
+                expected_request_id=request_id,
+            )
+            if not response.success:
+                raise CapabilityCallError(response.error_code or "broker_failed")
+            return response.result
 
 
 class Llm(Protocol):
@@ -58,7 +118,7 @@ class MockLlm:
 class SessionStorage:
     """Copy-on-read JSON storage scoped to one replay session and byte budget."""
 
-    __slots__ = ("_session_id", "_max_bytes", "_values")
+    __slots__ = ("_max_bytes", "_session_id", "_values")
 
     def __init__(self, session_id: str, *, max_bytes: int = 64 * 1024) -> None:
         if not session_id:
@@ -207,7 +267,7 @@ class PluginContext:
 class HostStub:
     """In-memory host for replay; no accounts, network, files, or platform APIs."""
 
-    __slots__ = ("_capabilities", "_llm", "_storage", "_storage_max_bytes", "_clock")
+    __slots__ = ("_capabilities", "_clock", "_llm", "_storage", "_storage_max_bytes")
 
     def __init__(
         self,
@@ -243,7 +303,10 @@ class HostStub:
 
 
 __all__ = [
+    "CapabilityCallError",
     "CapabilityDeniedError",
+    "CapabilityTransport",
+    "HostRpcClient",
     "HostStub",
     "MockLlm",
     "PluginContext",

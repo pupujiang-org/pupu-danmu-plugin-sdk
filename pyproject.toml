@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pupu-danmu-plugin-sdk"
-version = "0.1.0"
+version = "0.2.0.dev0"
 description = "Protocol v2 data contracts and local replay tools for Pupu Danmu plugins"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -25,7 +25,11 @@ classifiers = [
 pupu-danmu-plugin-replay = "pupu_danmu_plugin_sdk.replay:main"
 
 [dependency-groups]
-dev = ["pytest==9.1.1"]
+dev = ["pytest==9.1.1", "ruff==0.16.3"]
+
+[tool.ruff.lint]
+# Keep the established ValueError contract for invalid replay inputs.
+ignore = ["TRY004"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pupu_danmu_plugin_sdk"]

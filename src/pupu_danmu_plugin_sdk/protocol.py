@@ -10,14 +10,11 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Iterable
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import UTC
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import TypeAlias
 
 PROTOCOL_VERSION = 2
 MAX_MESSAGE_BYTES = 128 * 1024
@@ -34,6 +31,12 @@ MAX_JSON_NODES = 4096
 SUPPORTED_CAPABILITIES = frozenset(
     {"chat.read", "room.read", "llm.generate", "storage.session"}
 )
+_CAPABILITY_METHODS = {
+    "llm.generate.generate": "llm.generate",
+    "storage.session.get": "storage.session",
+    "storage.session.set": "storage.session",
+    "storage.session.delete": "storage.session",
+}
 
 _CODE = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -388,8 +391,8 @@ class TypedFailure:
         object.__setattr__(self, "code", code)
 
 
-JsonScalar: TypeAlias = str | int | float | bool | None
-JsonValue: TypeAlias = JsonScalar | tuple["JsonValue", ...] | Mapping[str, "JsonValue"]
+type JsonScalar = str | int | float | bool | None
+type JsonValue = JsonScalar | tuple[JsonValue, ...] | Mapping[str, JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,9 +411,15 @@ class CapabilityCall:
         capability = _text(self.capability, "capability", 64)
         if capability not in SUPPORTED_CAPABILITIES:
             raise PluginProtocolError("unsupported capability")
+        method = _text(self.method, "method", 64)
+        required_capability = _CAPABILITY_METHODS.get(method)
+        if required_capability is None:
+            raise PluginProtocolError("unsupported method")
+        if capability != required_capability:
+            raise PluginProtocolError("capability does not match method")
         object.__setattr__(self, "request_id", request_id)
         object.__setattr__(self, "capability", capability)
-        object.__setattr__(self, "method", _text(self.method, "method", 64))
+        object.__setattr__(self, "method", method)
         if not isinstance(self.payload, Mapping):
             raise PluginProtocolError("capability payload must be an object")
         frozen = _freeze_json(self.payload)
@@ -418,7 +427,180 @@ class CapabilityCall:
         object.__setattr__(self, "payload", frozen)
 
 
-WorkerOutcome: TypeAlias = Candidate | Silent | TypedFailure
+@dataclass(frozen=True, slots=True)
+class CapabilityResponse:
+    """One broker response, correlated only by the RPC request id."""
+
+    request_id: str
+    success: bool
+    result: JsonValue = None
+    error_code: str | None = None
+
+    def __post_init__(self) -> None:
+        request_id = _text(self.request_id, "request_id", 128)
+        if not _IDENTIFIER.fullmatch(request_id):
+            raise PluginProtocolError("request_id is invalid")
+        if type(self.success) is not bool:
+            raise PluginProtocolError("success must be a boolean")
+        if self.success:
+            if self.error_code is not None:
+                raise PluginProtocolError("response branches are mutually exclusive")
+            result = _freeze_json(self.result)
+            _check_json_tree(result)
+            object.__setattr__(self, "result", result)
+        else:
+            if self.result is not None or self.error_code is None:
+                raise PluginProtocolError("response branches are mutually exclusive")
+            error_code = _text(self.error_code, "error_code", 64)
+            if not _CODE.fullmatch(error_code):
+                raise PluginProtocolError("error_code is invalid")
+            object.__setattr__(self, "result", None)
+            object.__setattr__(self, "error_code", error_code)
+        object.__setattr__(self, "request_id", request_id)
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCancellation:
+    """Host control message that cancels one active invocation."""
+
+    invocation_id: str
+
+    def __post_init__(self) -> None:
+        invocation_id = _text(self.invocation_id, "invocation_id", 128)
+        if not _IDENTIFIER.fullmatch(invocation_id):
+            raise PluginProtocolError("invocation_id is invalid")
+        object.__setattr__(self, "invocation_id", invocation_id)
+
+
+type WorkerOutcome = Candidate | Silent | TypedFailure
+
+
+def encode_capability_call(call: CapabilityCall) -> bytes:
+    """Encode a host broker request without invocation identity."""
+
+    if not isinstance(call, CapabilityCall):
+        raise PluginProtocolError("capability call must use the protocol DTO")
+    return _encode_json(
+        {
+            "protocol_version": PROTOCOL_VERSION,
+            "type": "capability_call",
+            "request_id": call.request_id,
+            "capability": call.capability,
+            "method": call.method,
+            "payload": _json_value(call.payload),
+        }
+    )
+
+
+def decode_capability_call(
+    payload: bytes | str | Mapping[str, object],
+) -> CapabilityCall:
+    """Decode a broker request with exact top-level and method validation."""
+
+    raw = _load_json(payload)
+    fields = {
+        "protocol_version",
+        "type",
+        "request_id",
+        "capability",
+        "method",
+        "payload",
+    }
+    _keys(raw, fields, required=fields)
+    _version_and_type(raw, "capability_call")
+    call_payload = raw["payload"]
+    if not isinstance(call_payload, Mapping):
+        raise PluginProtocolError("capability payload must be an object")
+    return CapabilityCall(
+        request_id=_string(raw["request_id"], "request_id"),
+        capability=_string(raw["capability"], "capability"),
+        method=_string(raw["method"], "method"),
+        payload=call_payload,
+    )
+
+
+def encode_capability_response(response: CapabilityResponse) -> bytes:
+    """Encode one success or stable error response without invocation identity."""
+
+    if not isinstance(response, CapabilityResponse):
+        raise PluginProtocolError("capability response must use the protocol DTO")
+    value: dict[str, object] = {
+        "protocol_version": PROTOCOL_VERSION,
+        "type": "capability_response",
+        "request_id": response.request_id,
+        "success": response.success,
+    }
+    if response.success:
+        value["result"] = _json_value(response.result)
+    else:
+        value["error_code"] = response.error_code
+    return _encode_json(value)
+
+
+def decode_capability_response(
+    payload: bytes | str | Mapping[str, object],
+    *,
+    expected_request_id: str | None = None,
+) -> CapabilityResponse:
+    """Decode a broker response and optionally enforce request correlation."""
+
+    raw = _load_json(payload)
+    allowed = {
+        "protocol_version",
+        "type",
+        "request_id",
+        "success",
+        "result",
+        "error_code",
+    }
+    required = {"protocol_version", "type", "request_id", "success"}
+    _keys(raw, allowed, required)
+    _version_and_type(raw, "capability_response")
+    request_id = _string(raw["request_id"], "request_id")
+    if expected_request_id is not None and request_id != expected_request_id:
+        raise PluginProtocolError("capability response request_id mismatch")
+    success = _boolean(raw["success"], "success")
+    if success:
+        if "result" not in raw or "error_code" in raw:
+            raise PluginProtocolError("response branches are mutually exclusive")
+        return CapabilityResponse(
+            request_id=request_id,
+            success=True,
+            result=raw["result"],  # type: ignore[arg-type]
+        )
+    if "error_code" not in raw or "result" in raw:
+        raise PluginProtocolError("response branches are mutually exclusive")
+    return CapabilityResponse(
+        request_id=request_id,
+        success=False,
+        error_code=_string(raw["error_code"], "error_code"),
+    )
+
+
+def encode_worker_cancellation(cancellation: WorkerCancellation) -> bytes:
+    """Encode a bounded host cancellation notification for the current Worker."""
+
+    if not isinstance(cancellation, WorkerCancellation):
+        raise PluginProtocolError("cancellation must use the protocol DTO")
+    return _encode_json(
+        {
+            "protocol_version": PROTOCOL_VERSION,
+            "type": "cancel",
+            "invocation_id": cancellation.invocation_id,
+        }
+    )
+
+
+def decode_worker_cancellation(
+    payload: bytes | str | Mapping[str, object],
+) -> WorkerCancellation:
+    """Decode a strict cancellation message without session or run authority."""
+
+    raw = _load_json(payload)
+    fields = {"protocol_version", "type", "invocation_id"}
+    _keys(raw, fields, required=fields)
+    _version_and_type(raw, "cancel")
+    return WorkerCancellation(_string(raw["invocation_id"], "invocation_id"))
 
 
 def encode_invocation(invocation: Invocation) -> bytes:
@@ -994,12 +1176,23 @@ def _freeze_json(value: object, *, depth: int = 0) -> object:
     raise PluginProtocolError("protocol contains a non-JSON value")
 
 
+def _json_value(value: object) -> object:
+    """Convert an immutable JSON tree to ordinary encoder-compatible containers."""
+
+    if isinstance(value, Mapping):
+        return {key: _json_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_value(item) for item in value]
+    return value
+
+
 __all__ = [
     "MAX_CANDIDATE_CHARS",
     "MAX_VIEWER_MESSAGES",
     "SUPPORTED_CAPABILITIES",
     "Candidate",
     "CapabilityCall",
+    "CapabilityResponse",
     "EvidenceSource",
     "Invocation",
     "Opportunity",
@@ -1016,9 +1209,16 @@ __all__ = [
     "TypedFailure",
     "ViewerChatSnapshot",
     "ViewerMessage",
+    "WorkerCancellation",
     "WorkerOutcome",
+    "decode_capability_call",
+    "decode_capability_response",
     "decode_invocation",
+    "decode_worker_cancellation",
     "decode_worker_outcome",
+    "encode_capability_call",
+    "encode_capability_response",
     "encode_invocation",
+    "encode_worker_cancellation",
     "encode_worker_outcome",
 ]

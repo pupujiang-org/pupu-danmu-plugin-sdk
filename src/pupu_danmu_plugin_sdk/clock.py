@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 
 class ReplayClock:

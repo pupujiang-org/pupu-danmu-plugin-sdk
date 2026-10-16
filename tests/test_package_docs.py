@@ -15,6 +15,7 @@ def test_compatibility_docs_separate_package_protocol_and_host_versions() -> Non
         encoding="utf-8"
     )
     assert "SDK package | 0.1.0" in compatibility
+    assert "0.2.0.dev0 (local development)" in compatibility
     assert "Plugin protocol | 2" in compatibility
     assert "Host application | Host-owned" in compatibility
     assert "reject unknown protocol versions" in compatibility
