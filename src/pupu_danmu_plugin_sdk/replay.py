@@ -102,12 +102,12 @@ def _load_plugin(specification: str) -> PluginEntrypoint:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate and replay anonymous protocol-v2 JSONL locally. "
+            "Validate and replay anonymous protocol-v3 JSONL locally. "
             "This tool never reads account state or runs a remotely installed plugin."
         )
     )
     parser.add_argument(
-        "input", type=Path, help="UTF-8 JSONL of protocol-v2 invocations"
+        "input", type=Path, help="UTF-8 JSONL of protocol-v3 invocations"
     )
     parser.add_argument(
         "--plugin",

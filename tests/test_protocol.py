@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from conftest import NOW
@@ -11,6 +12,8 @@ from pupu_danmu_plugin_sdk.protocol import (
     CapabilityCall,
     CapabilityResponse,
     PluginProtocolError,
+    SessionConfiguration,
+    SessionFocus,
     ViewerChatSnapshot,
     ViewerMessage,
     WorkerCancellation,
@@ -25,22 +28,98 @@ from pupu_danmu_plugin_sdk.protocol import (
 )
 
 
-def test_protocol_version_two_round_trips(invocation) -> None:
+def test_protocol_version_three_round_trips(invocation) -> None:
     encoded = encode_invocation(invocation)
-    assert json.loads(encoded)["protocol_version"] == PROTOCOL_VERSION == 2
+    assert json.loads(encoded)["protocol_version"] == PROTOCOL_VERSION == 3
     assert decode_invocation(encoded) == invocation
+
+
+def test_session_configuration_round_trips_separately_from_session_focus(
+    invocation,
+) -> None:
+    configuration = SessionConfiguration(
+        persona_id="friendly-host",
+        options={"initiative_enabled": True, "style": {"brevity": "short"}},
+    )
+    configured_invocation = replace(
+        invocation,
+        session_configuration=configuration,
+        session_focus=SessionFocus(current_focus="viewer topic"),
+    )
+
+    encoded = encode_invocation(configured_invocation)
+    payload = json.loads(encoded)
+
+    assert payload["session_configuration"] == {
+        "persona_id": "friendly-host",
+        "options": {
+            "initiative_enabled": True,
+            "style": {"brevity": "short"},
+        },
+    }
+    assert payload["session_focus"]["current_focus"] == "viewer topic"
+    assert decode_invocation(encoded) == configured_invocation
+    with pytest.raises(TypeError):
+        configuration.options["initiative_enabled"] = False
+    with pytest.raises(TypeError):
+        configuration.options["style"]["brevity"] = "long"
+
+
+def test_session_configuration_requires_a_bounded_json_object() -> None:
+    with pytest.raises(PluginProtocolError, match="persona_id is invalid"):
+        SessionConfiguration(persona_id="Friendly Host")
+
+    with pytest.raises(PluginProtocolError, match="options must be an object"):
+        SessionConfiguration(options=["not", "an", "object"])
+
+    with pytest.raises(PluginProtocolError, match="option key is invalid"):
+        SessionConfiguration(options={"Not-Lowercase": True})
+
+    with pytest.raises(PluginProtocolError, match="option limit"):
+        SessionConfiguration(options={f"option_{index}": index for index in range(33)})
+
+    with pytest.raises(PluginProtocolError, match="non-finite"):
+        SessionConfiguration(options={"threshold": float("nan")})
+
+    with pytest.raises(PluginProtocolError, match="nesting"):
+        nested = "leaf"
+        for _ in range(18):
+            nested = {"child": nested}
+        SessionConfiguration(options={"nested": nested})
+
+
+def test_protocol_v3_requires_the_session_configuration_field(invocation) -> None:
+    payload = json.loads(encode_invocation(invocation))
+    del payload["session_configuration"]
+
+    with pytest.raises(PluginProtocolError, match="missing or unsupported fields"):
+        decode_invocation(payload)
+
+
+def test_protocol_v3_rejects_unknown_session_configuration_fields(invocation) -> None:
+    payload = json.loads(encode_invocation(invocation))
+    payload["session_configuration"]["host_private_value"] = "must not cross IPC"
+
+    with pytest.raises(PluginProtocolError, match="missing or unsupported fields"):
+        decode_invocation(payload)
+
+
+def test_session_configuration_read_is_a_supported_projection_capability() -> None:
+    from pupu_danmu_plugin_sdk.protocol import SUPPORTED_CAPABILITIES
+
+    assert "session.config.read" in SUPPORTED_CAPABILITIES
 
 
 def test_unknown_protocol_version_fails_closed(invocation) -> None:
     payload = json.loads(encode_invocation(invocation))
-    payload["protocol_version"] = 3
+    payload["protocol_version"] = 4
     with pytest.raises(PluginProtocolError, match="unsupported protocol version"):
         decode_invocation(payload)
 
 
 def test_duplicate_and_unknown_fields_are_rejected(invocation) -> None:
     with pytest.raises(PluginProtocolError, match="duplicate field"):
-        decode_invocation('{"protocol_version":2,"protocol_version":2}')
+        decode_invocation('{"protocol_version":3,"protocol_version":3}')
 
     payload = json.loads(encode_invocation(invocation))
     payload["host_private_field"] = "must not cross the SDK boundary"
@@ -109,7 +188,7 @@ def test_capability_call_codec_rejects_unknown_and_duplicate_fields() -> None:
 
     with pytest.raises(PluginProtocolError, match="duplicate field"):
         decode_capability_call(
-            '{"protocol_version":2,"type":"capability_call",'
+            '{"protocol_version":3,"type":"capability_call",'
             '"request_id":"rpc-1","request_id":"rpc-2",'
             '"capability":"storage.session","method":"storage.session.get",'
             '"payload":{"key":"topic"}}'
@@ -170,7 +249,7 @@ def test_capability_response_rejects_mismatched_or_duplicate_request_id() -> Non
 
     with pytest.raises(PluginProtocolError, match="duplicate field"):
         decode_capability_response(
-            '{"protocol_version":2,"type":"capability_response",'
+            '{"protocol_version":3,"type":"capability_response",'
             '"request_id":"rpc-1","request_id":"rpc-1",'
             '"success":true,"result":null}'
         )

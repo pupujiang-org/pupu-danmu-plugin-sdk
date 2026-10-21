@@ -11,17 +11,18 @@ import json
 import math
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 MAX_MESSAGE_BYTES = 128 * 1024
 MAX_VIEWER_MESSAGES = 50
 MAX_SELF_SENT_MESSAGES = 10
 MAX_SETTLEMENTS = 10
 MAX_EVIDENCE_ITEMS = 50
+MAX_SESSION_OPTIONS = 32
 MAX_CANDIDATE_CHARS = 1000
 MAX_TEXT_CHARS = 4000
 MAX_CLAIMS = 32
@@ -29,7 +30,13 @@ MAX_TAGS = 32
 MAX_JSON_DEPTH = 16
 MAX_JSON_NODES = 4096
 SUPPORTED_CAPABILITIES = frozenset(
-    {"chat.read", "room.read", "llm.generate", "storage.session"}
+    {
+        "chat.read",
+        "room.read",
+        "session.config.read",
+        "llm.generate",
+        "storage.session",
+    }
 )
 _CAPABILITY_METHODS = {
     "llm.generate.generate": "llm.generate",
@@ -47,7 +54,7 @@ class PluginProtocolError(ValueError):
 
 
 class TrustLevel(StrEnum):
-    """Trust labels available in protocol v2; claims are always untrusted."""
+    """Trust labels available in protocol v3; claims are always untrusted."""
 
     UNTRUSTED = "untrusted"
 
@@ -207,6 +214,36 @@ class SessionFocus:
 
 
 @dataclass(frozen=True, slots=True)
+class SessionConfiguration:
+    """User-selected plugin settings, separate from host-derived room focus.
+
+    The host must validate options against the installed manifest schema and
+    project this DTO only when ``session.config.read`` is granted. These values
+    do not grant capabilities or represent verified product facts.
+    """
+
+    persona_id: str = ""
+    options: Mapping[str, JsonValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        persona_id = _optional_text(self.persona_id, "persona_id", 128)
+        if persona_id and not _IDENTIFIER.fullmatch(persona_id):
+            raise PluginProtocolError("persona_id is invalid")
+        if not isinstance(self.options, Mapping):
+            raise PluginProtocolError("options must be an object")
+        if len(self.options) > MAX_SESSION_OPTIONS:
+            raise PluginProtocolError("session configuration exceeds its option limit")
+        if not all(
+            isinstance(key, str) and _CODE.fullmatch(key) for key in self.options
+        ):
+            raise PluginProtocolError("session configuration option key is invalid")
+        frozen = _freeze_json(self.options)
+        _check_json_tree(frozen)
+        object.__setattr__(self, "persona_id", persona_id)
+        object.__setattr__(self, "options", frozen)
+
+
+@dataclass(frozen=True, slots=True)
 class Opportunity:
     """A host-issued content opportunity; it never authorizes sending."""
 
@@ -275,6 +312,9 @@ class Invocation:
     viewer_chat: ViewerChatSnapshot
     session_focus: SessionFocus
     opportunity: Opportunity
+    session_configuration: SessionConfiguration = field(
+        default_factory=SessionConfiguration
+    )
     room_evidence: tuple[RoomEvidence, ...] = ()
     recent_self_sent: tuple[SelfSentMessage, ...] = ()
     settlements: tuple[Settlement, ...] = ()
@@ -293,6 +333,8 @@ class Invocation:
             raise PluginProtocolError("session_focus is invalid")
         if not isinstance(self.opportunity, Opportunity):
             raise PluginProtocolError("opportunity is invalid")
+        if not isinstance(self.session_configuration, SessionConfiguration):
+            raise PluginProtocolError("session_configuration is invalid")
         room_evidence = tuple(self.room_evidence)
         if len(room_evidence) > MAX_EVIDENCE_ITEMS or not all(
             isinstance(item, RoomEvidence) for item in room_evidence
@@ -623,6 +665,9 @@ def encode_invocation(invocation: Invocation) -> bytes:
             ]
         },
         "session_focus": _session_focus_to_json(invocation.session_focus),
+        "session_configuration": _session_configuration_to_json(
+            invocation.session_configuration
+        ),
         "opportunity": {
             "mode": invocation.opportunity.mode.value,
             "available": invocation.opportunity.available,
@@ -655,6 +700,7 @@ def decode_invocation(payload: bytes | str | Mapping[str, object]) -> Invocation
             "revision",
             "viewer_chat",
             "session_focus",
+            "session_configuration",
             "opportunity",
             "room_evidence",
             "recent_self_sent",
@@ -670,6 +716,7 @@ def decode_invocation(payload: bytes | str | Mapping[str, object]) -> Invocation
             "revision",
             "viewer_chat",
             "session_focus",
+            "session_configuration",
             "opportunity",
         },
     )
@@ -702,6 +749,9 @@ def decode_invocation(payload: bytes | str | Mapping[str, object]) -> Invocation
         {"mode", "available", "reason"},
         {"mode", "available"},
         "opportunity",
+    )
+    session_configuration = _session_configuration_from_json(
+        raw["session_configuration"]
     )
     messages = tuple(
         _viewer_message_from_json(item)
@@ -760,6 +810,7 @@ def decode_invocation(payload: bytes | str | Mapping[str, object]) -> Invocation
                 opportunity.get("reason", ""), "opportunity reason", allow_empty=True
             ),
         ),
+        session_configuration=session_configuration,
         room_evidence=room_evidence,
         recent_self_sent=self_sent,
         settlements=settlements,
@@ -922,6 +973,28 @@ def _session_focus_to_json(focus: SessionFocus) -> dict[str, object]:
         else focus.last_topic_shift_at.isoformat(),
         "time_since_last_external_message_seconds": focus.time_since_last_external_message_seconds,
     }
+
+
+def _session_configuration_to_json(
+    configuration: SessionConfiguration,
+) -> dict[str, object]:
+    return {
+        "persona_id": configuration.persona_id,
+        "options": _json_value(configuration.options),
+    }
+
+
+def _session_configuration_from_json(value: object) -> SessionConfiguration:
+    raw = _object(
+        value,
+        {"persona_id", "options"},
+        {"persona_id", "options"},
+        "session_configuration",
+    )
+    return SessionConfiguration(
+        persona_id=_optional_text(raw["persona_id"], "persona_id", 128),
+        options=raw["options"],  # type: ignore[arg-type]
+    )
 
 
 def _self_sent_to_json(item: SelfSentMessage) -> dict[str, object]:
@@ -1188,6 +1261,7 @@ def _json_value(value: object) -> object:
 
 __all__ = [
     "MAX_CANDIDATE_CHARS",
+    "MAX_SESSION_OPTIONS",
     "MAX_VIEWER_MESSAGES",
     "SUPPORTED_CAPABILITIES",
     "Candidate",
@@ -1201,6 +1275,7 @@ __all__ = [
     "PluginProtocolError",
     "RoomEvidence",
     "SelfSentMessage",
+    "SessionConfiguration",
     "SessionFocus",
     "Settlement",
     "SettlementOutcome",

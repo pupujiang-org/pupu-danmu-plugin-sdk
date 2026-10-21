@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from pupu_danmu_plugin_sdk.host import (
@@ -11,6 +13,7 @@ from pupu_danmu_plugin_sdk.host import (
 )
 from pupu_danmu_plugin_sdk.protocol import (
     CapabilityResponse,
+    SessionConfiguration,
     decode_capability_call,
     encode_capability_response,
 )
@@ -43,6 +46,29 @@ def test_context_requires_each_declared_capability(invocation) -> None:
         _ = context.storage
     with pytest.raises(CapabilityDeniedError):
         context.generate("question")
+
+
+def test_session_configuration_and_room_focus_require_separate_capabilities(
+    invocation,
+) -> None:
+    configuration = SessionConfiguration(
+        persona_id="friendly-host", options={"initiative_enabled": True}
+    )
+    configured_invocation = replace(invocation, session_configuration=configuration)
+
+    configuration_context = HostStub(capabilities={"session.config.read"}).context_for(
+        configured_invocation
+    )
+    assert configuration_context.session_configuration == configuration
+    with pytest.raises(CapabilityDeniedError):
+        _ = configuration_context.session_focus
+
+    room_context = HostStub(capabilities={"room.read"}).context_for(
+        configured_invocation
+    )
+    assert room_context.session_focus == invocation.session_focus
+    with pytest.raises(CapabilityDeniedError):
+        _ = room_context.session_configuration
 
 
 def test_storage_is_bounded_and_session_scoped(invocation) -> None:
