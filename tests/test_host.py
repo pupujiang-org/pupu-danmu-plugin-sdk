@@ -54,13 +54,11 @@ def test_session_configuration_and_room_focus_require_separate_capabilities(
     configuration = SessionConfiguration(
         persona_id="friendly-host", options={"initiative_enabled": True}
     )
-    configured_invocation = replace(
-        invocation, session_configuration=configuration
-    )
+    configured_invocation = replace(invocation, session_configuration=configuration)
 
-    configuration_context = HostStub(
-        capabilities={"session.config.read"}
-    ).context_for(configured_invocation)
+    configuration_context = HostStub(capabilities={"session.config.read"}).context_for(
+        configured_invocation
+    )
     assert configuration_context.session_configuration == configuration
     with pytest.raises(CapabilityDeniedError):
         _ = configuration_context.session_focus

@@ -34,7 +34,9 @@ def test_protocol_version_three_round_trips(invocation) -> None:
     assert decode_invocation(encoded) == invocation
 
 
-def test_session_configuration_round_trips_separately_from_session_focus(invocation) -> None:
+def test_session_configuration_round_trips_separately_from_session_focus(
+    invocation,
+) -> None:
     configuration = SessionConfiguration(
         persona_id="friendly-host",
         options={"initiative_enabled": True, "style": {"brevity": "short"}},

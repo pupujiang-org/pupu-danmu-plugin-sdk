@@ -94,6 +94,21 @@ def _install_and_replay(artifact: Path, uv: str, work: Path) -> None:
     python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
+    environment["UV_PROJECT_ENVIRONMENT"] = str(venv)
+    _run(
+        [
+            uv,
+            "sync",
+            "--project",
+            str(_ROOT),
+            "--locked",
+            "--group",
+            "dev",
+            "--no-install-project",
+        ],
+        cwd=work,
+        environment=environment,
+    )
     _run(
         [uv, "pip", "install", "--python", str(python), "--no-deps", str(artifact)],
         cwd=work,
@@ -111,17 +126,43 @@ def _install_and_replay(artifact: Path, uv: str, work: Path) -> None:
         raise RuntimeError(f"Replay resolved from the source checkout: {output!r}")
 
     import_check = (
+        "import importlib.util; "
         "import sys; "
+        "from pathlib import Path; "
         "import pupu_danmu_plugin_sdk.clock; "
         "import pupu_danmu_plugin_sdk.host; "
         "import pupu_danmu_plugin_sdk.protocol; "
         "import pupu_danmu_plugin_sdk.replay; "
+        "module_path = Path(importlib.util.find_spec('pupu_danmu_plugin_sdk').origin).resolve(); "
+        "assert Path(sys.prefix).resolve() in module_path.parents; "
         "assert not any(name == 'pupu_danmu' or name.startswith('pupu_danmu.') "
         "for name in sys.modules); "
         "assert not any(name.startswith(('PySide6', 'PyQt', 'playwright')) "
         "for name in sys.modules)"
     )
     _run([str(python), "-c", import_check], cwd=work, environment=environment)
+
+    protocol_tests = work / "protocol-tests"
+    protocol_tests.mkdir()
+    for filename in ("conftest.py", "test_protocol.py", "test_host.py"):
+        shutil.copyfile(_ROOT / "tests" / filename, protocol_tests / filename)
+    test_output = _run(
+        [
+            str(python),
+            "-m",
+            "pytest",
+            "-q",
+            str(protocol_tests / "test_protocol.py"),
+            str(protocol_tests / "test_host.py"),
+        ],
+        cwd=work,
+        environment=environment,
+    )
+    if "passed" not in test_output:
+        raise RuntimeError(f"SDK protocol tests did not report passes: {test_output!r}")
+    print(
+        f"{artifact.name}: installed SDK protocol tests passed outside the source tree"
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -166,7 +207,10 @@ def main() -> int:
     sums = "".join(f"{_sha256(path)}  {path.name}\n" for path in artifacts)
     (dist_dir / "SHA256SUMS").write_text(sums, encoding="utf-8", newline="\n")
     print(sums, end="")
-    print("verified wheel and sdist: anonymous replay passed outside the source tree")
+    print(
+        "verified wheel and sdist: anonymous replay and installed SDK protocol tests "
+        "passed outside the source tree"
+    )
     return 0
 
 

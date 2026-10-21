@@ -2,7 +2,7 @@
 
 Package releases use semantic versioning. Protocol compatibility is tracked separately in docs/protocol-compatibility.md.
 
-## 0.3.0.dev0 - Unreleased
+## 0.3.0 - Unreleased
 
 - Add protocol v3 session configuration with a persona id and bounded, immutable JSON options.
 - Add `session.config.read` as an explicit projection capability, separate from `room.read` and session focus.

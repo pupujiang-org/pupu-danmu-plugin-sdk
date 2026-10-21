@@ -15,7 +15,7 @@ Install the exact wheel attached to the official GitHub release:
 
     uv add "pupu-danmu-plugin-sdk @ https://github.com/pupujiang-org/pupu-danmu-plugin-sdk/releases/download/v0.2.0/pupu_danmu_plugin_sdk-0.2.0-py3-none-any.whl"
 
-The published v0.2.0 release implements protocol v2 and remains unchanged. This checkout develops SDK v0.3.0.dev0 with protocol v3; it is not published yet.
+The currently published v0.2.0 release implements protocol v2 and remains immutable. This branch prepares SDK v0.3.0 with protocol v3; its release assets will only be available after a formal release. A host and Worker must use the same protocol version; v2 messages are rejected by v3 rather than reinterpreted.
 
 For local development from a checkout:
 

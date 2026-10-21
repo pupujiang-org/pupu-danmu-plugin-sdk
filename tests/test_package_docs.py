@@ -8,7 +8,9 @@ def test_readme_documents_install_and_local_only_replay() -> None:
     assert "releases/download/v0.2.0" in readme
     assert "anonymous.jsonl" in readme
     assert "protocol v3" in readme
-    assert "published v0.2.0 release implements protocol v2" in readme
+    assert "currently published v0.2.0 release implements protocol v2" in readme
+    assert "prepares SDK v0.3.0 with protocol v3" in readme
+    assert "assets will only be available after a formal release" in readme
     assert "does not provide an operating-system sandbox" in readme
     assert "do not sandbox Python code" in readme
 
@@ -17,9 +19,11 @@ def test_compatibility_docs_separate_package_protocol_and_host_versions() -> Non
     compatibility = (_ROOT / "docs" / "protocol-compatibility.md").read_text(
         encoding="utf-8"
     )
-    assert "SDK package | 0.3.0.dev0" in compatibility
+    assert "SDK package | 0.3.0 (prepared)" in compatibility
     assert "Plugin protocol | 3" in compatibility
     assert "v0.2.0 / 2" in compatibility
+    assert "session.config.read" in compatibility
+    assert "Same outcome variants and fields." in compatibility
     assert "Host application | Host-owned" in compatibility
     assert "reject unknown protocol versions" in compatibility
     assert "one invocation per process" in compatibility
